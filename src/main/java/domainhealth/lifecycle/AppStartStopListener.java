@@ -67,8 +67,12 @@ public class AppStartStopListener extends GenericServlet {
 			throw new ServletException("Neither a JVM start-up '-D parameter nor a web.xml context-param has been defined for parameter '" + PropKey.STATS_OUTPUT_PATH_PROP + "' to specify the root path of the CSV output path");
 		}
 
-		retrieverBackgroundService = new RetrieverBackgroundService(appProps);
-		retrieverBackgroundService.startup();		
+		try {
+			retrieverBackgroundService = new RetrieverBackgroundService(appProps);
+			retrieverBackgroundService.startup();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}		
 	}
 
 	/**
@@ -79,7 +83,7 @@ public class AppStartStopListener extends GenericServlet {
 	 */
 	public void destroy() {
 		AppLog.getLogger().notice("Stopping DomainHealth application");
-		retrieverBackgroundService.shutdown();
+		if (retrieverBackgroundService !=null ) retrieverBackgroundService.shutdown();
 	}
 	
 	// Members

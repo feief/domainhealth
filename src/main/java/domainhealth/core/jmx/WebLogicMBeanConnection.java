@@ -173,7 +173,7 @@ public class WebLogicMBeanConnection {
 	 * @return The JNDI retrieved Server Runtime MBean
 	 * @throws NamingException Indicates a problem accessing the JNDI tree
 	 */
-	private static MBeanServerConnection getCachedLocalConn() throws NamingException {
+	protected static MBeanServerConnection getCachedLocalConn() throws NamingException {
 		if (cachedLocalConn == null) {		
 			synchronized (WebLogicMBeanConnection.class) {
 				if (cachedLocalConn == null) {
@@ -477,9 +477,9 @@ public class WebLogicMBeanConnection {
 	}
 	
 	// Members
-	private final JMXConnector jmxConnector;
-	private final MBeanServerConnection conn;
-	private final String connectionDescription;
+	protected JMXConnector jmxConnector;
+	protected MBeanServerConnection conn;
+	protected String connectionDescription;
 		
 	// Constants
 	protected static final String JNDI_ROOT = "/jndi/";

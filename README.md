@@ -1,7 +1,4 @@
-DomainHealth is an open source "zero-config" monitoring tool for WebLogic. It collects important server metrics over time, archives these into CSV files and provides a simple web interface for viewing graphs of current and historical statistics.
+fork then add new feature
 
-You can download the latest release from https://github.com/ccristian/domainhealth/releases/tag/1.1.1
-
-The wiki page can be found at https://github.com/ccristian/domainhealth/wiki
-
-Special thanks to Paul Done the original owner of this project
+* new option "dh_mode_central". it is true by default. it is same behavior as before, meaning only deploy onto admin server, remotely collect statistics from all running server instances. when set it false, it collect statistics only against local server. it does no longer rely on remote connection through listen port. it looks more efficient.
+* make it works with wls 12.2.1.3. including the webapp

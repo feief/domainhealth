@@ -14,12 +14,64 @@
 //POSSIBILITY OF SUCH DAMAGE.
 package domainhealth.backend.jmxpoll;
 
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.AGENTS;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.APPLICATION_RUNTIMES;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.COMPONENT_RUNTIMES;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.DESTINATIONS;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.EJB_COMPONENT_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.EJB_RUNTIMES;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.HEAP_FREE_CURRENT;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.HEAP_FREE_PERCENT;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.HEAP_SIZE_CURRENT;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.JDBC_DATA_SOURCE_RUNTIMES;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.JDBC_SERVICE_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.JMS_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.JMS_SERVERS;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.JTA_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.JVM_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.NAME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.OPEN_SOCKETS_CURRENT_COUNT;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.POOL_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.SAF_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.SERVER_STATE;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.THREAD_POOL_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.TRANSACTION_RUNTIME;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.TYPE;
+import static domainhealth.core.jmx.WebLogicMBeanPropConstants.WEBAPP_COMPONENT_RUNTIME;
+import static domainhealth.core.statistics.MonitorProperties.CORE_RESOURCE_TYPE;
+import static domainhealth.core.statistics.MonitorProperties.CORE_RSC_DEFAULT_NAME;
+import static domainhealth.core.statistics.MonitorProperties.DATASOURCE_RESOURCE_TYPE;
+import static domainhealth.core.statistics.MonitorProperties.DESTINATION_RESOURCE_TYPE;
+import static domainhealth.core.statistics.MonitorProperties.EJB_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.EJB_POOL_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.EJB_RESOURCE_TYPE;
+import static domainhealth.core.statistics.MonitorProperties.EJB_TRANSACTION_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.HOSTMACHINE_RESOURCE_TYPE;
+import static domainhealth.core.statistics.MonitorProperties.HOST_MACHINE_MBEAN_FULLNAME_TEMPLATE;
+import static domainhealth.core.statistics.MonitorProperties.HOST_MACHINE_MBEAN_NAME;
+import static domainhealth.core.statistics.MonitorProperties.HOST_MACHINE_STATS_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.JAVA_JVM_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.JDBC_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.JMS_DESTINATION_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.JTA_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.JVM_MBEAN_FULLNAME_TEMPLATE;
+import static domainhealth.core.statistics.MonitorProperties.JVM_MBEAN_NAME;
+import static domainhealth.core.statistics.MonitorProperties.JVM_RESOURCE_TYPE;
+import static domainhealth.core.statistics.MonitorProperties.SAF_AGENT_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.SAF_RESOURCE_TYPE;
+import static domainhealth.core.statistics.MonitorProperties.THREADPOOL_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.WEBAPP_MBEAN_MONITOR_ATTR_LIST;
+import static domainhealth.core.statistics.MonitorProperties.WEBAPP_RESOURCE_TYPE;
+import static domainhealth.core.statistics.StatisticsStorage.SEPARATOR;
+import static domainhealth.core.util.DateUtil.DATETIME_PARAM_FORMAT;
+
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
 
+import javax.management.AttributeNotFoundException;
 import javax.management.ObjectName;
 
 import domainhealth.backend.retriever.DataRetrievalException;
@@ -27,14 +79,9 @@ import domainhealth.backend.retriever.StatisticCapturer;
 import domainhealth.core.env.AppLog;
 import domainhealth.core.jmx.WebLogicMBeanConnection;
 import domainhealth.core.jmx.WebLogicMBeanException;
-import domainhealth.core.statistics.StatisticsStorage;
 import domainhealth.core.statistics.ResourceNameNormaliser;
+import domainhealth.core.statistics.StatisticsStorage;
 import domainhealth.frontend.data.ServerState;
-
-import static domainhealth.core.jmx.WebLogicMBeanPropConstants.*;
-import static domainhealth.core.statistics.StatisticsStorage.*;
-import static domainhealth.core.statistics.MonitorProperties.*;
-import static domainhealth.core.util.DateUtil.DATETIME_PARAM_FORMAT;
 
 /**
  * Implementation of the statistics capturer for capturing a specific WebLogic 
@@ -412,24 +459,33 @@ public class StatisticCapturerJMXPoll extends StatisticCapturer {
 										}
 											
 										if (!blacklist) {
-											ObjectName poolRuntime = getConn().getChild(ejbRuntime, POOL_RUNTIME);
+											ObjectName poolRuntime;
+											StringBuilder contentLine = new StringBuilder();
+											try {
+												poolRuntime = getConn().getChild(ejbRuntime, POOL_RUNTIME);
+												contentLine.append(constructStatsLine(poolRuntime, EJB_POOL_MBEAN_MONITOR_ATTR_LIST));
+											} catch (Exception e) {
+												// javax.management.AttributeNotFoundException: 
+											}
 											ObjectName txRuntime = getConn().getChild(ejbRuntime, TRANSACTION_RUNTIME);
-											StringBuilder contentLine = new StringBuilder(constructStatsLine(poolRuntime, EJB_POOL_MBEAN_MONITOR_ATTR_LIST));
 											appendToStatsLine(contentLine, txRuntime, EJB_TRANSACTION_MBEAN_MONITOR_ATTR_LIST);							
 											getCSVStats().appendToResourceStatisticsCSV(new Date(), getServerName(), EJB_RESOURCE_TYPE, name, headerLine, contentLine.toString());
 											artifactList.put(name, now);
 										}
 									} catch (Exception e) {
 										AppLog.getLogger().warning("Issue logging " + EJB_RESOURCE_TYPE + ":" + ejbRuntime.getCanonicalName() + " resources for server " + getServerName() + ", reason=" + e.getLocalizedMessage());
+										e.printStackTrace();
 									}										
 								}
 							}
 						} catch (Exception e) {
 							AppLog.getLogger().warning("Issue logging " + EJB_RESOURCE_TYPE + ":" + componentRuntime.getCanonicalName() + " resources for server " + getServerName() + ", reason=" + e.getLocalizedMessage());
+							e.printStackTrace();
 						}
 					}
 				} catch (Exception e) {
 					AppLog.getLogger().warning("Issue logging " + EJB_RESOURCE_TYPE + ":" + appRuntime.getCanonicalName() + " resources for server " + getServerName() + ", reason=" + e.getLocalizedMessage());
+					e.printStackTrace();
 				}
 			}
 			
