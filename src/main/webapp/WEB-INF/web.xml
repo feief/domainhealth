@@ -22,7 +22,7 @@
     </context-param>
     <context-param>
         <param-name>dh_query_interval_secs</param-name>
-        <param-value>60</param-value>
+        <param-value>120</param-value>
     </context-param>
     <context-param>
         <param-name>dh_component_blacklist</param-name>
