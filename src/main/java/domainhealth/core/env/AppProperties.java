@@ -80,8 +80,10 @@ public class AppProperties extends Properties {
 		/**
 		 * The restricted action property name ("dh_restricted_action")
 		 */
-		RESTRICTED_ROLES { public String toString() { return "dh_restricted_roles"; } }
-	};
+		RESTRICTED_ROLES { public String toString() { return "dh_restricted_roles"; } },
+
+		MODE_CENTRAL { public String toString() { return "dh_mode_central"; } }
+};
 
 	/**
 	 * Populate the set of named application properties (and servlet context 

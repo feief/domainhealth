@@ -19,7 +19,6 @@ import static domainhealth.core.jmx.WebLogicMBeanPropConstants.NAME;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
@@ -27,7 +26,6 @@ import javax.management.ObjectName;
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
 
-import com.sun.management.OperatingSystemMXBean;
 import commonj.work.WorkItem;
 import commonj.work.WorkManager;
 import domainhealth.backend.jmxpoll.StatisticCapturerJMXPoll;
@@ -38,6 +36,8 @@ import domainhealth.core.env.AppProperties;
 import domainhealth.core.env.AppProperties.PropKey;
 import domainhealth.core.env.ContextAwareWork;
 import domainhealth.core.jmx.DomainRuntimeServiceMBeanConnection;
+import domainhealth.core.jmx.LocalServerRuntimeServiceMBeanConnection;
+import domainhealth.core.jmx.WebLogicMBeanConnection;
 import domainhealth.core.jmx.WebLogicMBeanException;
 import domainhealth.core.statistics.StatisticsStorage;
 import domainhealth.core.util.BlacklistUtil;
@@ -68,7 +68,8 @@ public class RetrieverBackgroundService {
 		this.statisticsRetainNumDays = appProps.getIntProperty(PropKey.CSV_RETAIN_NUM_DAYS);
 		this.statisticsStorage = new StatisticsStorage(appProps.getProperty(PropKey.STATS_OUTPUT_PATH_PROP));		
 		int queryIntervalSecs = appProps.getIntProperty(PropKey.QUERY_INTERVAL_SECS_PROP);
-
+		this.modeCentral = appProps.getBoolProperty(PropKey.MODE_CENTRAL);
+		
 		if (queryIntervalSecs < MINIMUM_SLEEP_SECS) {
 			AppLog.getLogger().warning("Specified query interval seconds of '" + queryIntervalSecs + "' is too low - changing to value '" + MINIMUM_SLEEP_SECS + "'");
 			queryIntervalSecs = MINIMUM_SLEEP_SECS;
@@ -118,7 +119,7 @@ public class RetrieverBackgroundService {
 			AppLog.getLogger().info("Statistics Retriever Background Service starting up");
 			File rootDir = FileUtil.createOrRetrieveDir(statisticsStorage.getRootDirectoryPath());
 			AppLog.getLogger().notice("Statistic CSV files location: " + rootDir.getCanonicalPath());			
-			Thread backgroundThread = new Thread(new CaptureRunnable(), this.getClass().getName());
+			backgroundThread = new Thread(new CaptureRunnable(), this.getClass().getName());
 			backgroundThread.setDaemon(true);
 			backgroundThread.start();
 			AppLog.getLogger().debug("Created background Java daemon thread to drive data retrieval process");
@@ -134,6 +135,7 @@ public class RetrieverBackgroundService {
 	 */
 	public void shutdown() {
 		keepRunning = false;
+		backgroundThread.interrupt();
 		AppLog.getLogger().info("Statistics Retriever Background Service shutting down");
 	}
 
@@ -148,7 +150,7 @@ public class RetrieverBackgroundService {
 				try {
 					AppLog.getLogger().debug("About to sleep and then perform processing run via the background Java daemon thread");
 					performProcessingRun();
-				} catch (Exception e) {
+				} catch (Throwable e) {
 					AppLog.getLogger().warning("Statistics Retriever Background Service processing iteration (using Java Daemon Thread) has failed abnormally for this run. Reason: " + e.toString());
 				}
 			}			
@@ -228,13 +230,15 @@ public class RetrieverBackgroundService {
 		
 		AppLog.getLogger().debug("Statistics Retriever Background Service running first time processing initialisation steps");
 		
-		if (!DomainRuntimeServiceMBeanConnection.isThisTheAdminServer()) {
-			AppLog.getLogger().error("Attempt made to run 'DomainHealth' application on a managed server. Attempt halted. Undeploy 'DomainHealth' and re-deploy to run on the domain's Admin Server only");
-			shutdown();
-			return;
+		if (modeCentral) {
+			if (!DomainRuntimeServiceMBeanConnection.isThisTheAdminServer()) {
+				AppLog.getLogger().error("Attempt made to run 'DomainHealth' application on a managed server. Attempt halted. Undeploy 'DomainHealth' and re-deploy to run on the domain's Admin Server only");
+				shutdown();
+				return;
+			}
 		}
-
-		wlsVersionNumber = getWLSDomainVersion();		
+		
+		wlsVersionNumber = getWLSDomainVersion();	
 		
 		if (alwaysUseJMXPoll) {
 			useWLDFHarvester = false;				
@@ -287,6 +291,11 @@ AppLog.getLogger().info("RetrieverBackgroundService - WLS_MIN_VERSION_FOR_USING_
 	 * to run in parallel in the WebLogic thread pool.
 	 */
 	private void runNormalProcessing() {
+		if (!modeCentral) {
+			runNormalProcessingLocal();
+			return;
+		}
+		
 		DomainRuntimeServiceMBeanConnection conn = null;
 		
 		try {
@@ -300,6 +309,8 @@ AppLog.getLogger().info("RetrieverBackgroundService - WLS_MIN_VERSION_FOR_USING_
 				final String serverName = conn.getTextAttr(serverRuntimes[i], NAME);
 				final StatisticCapturer capturer = getStatisticCapturer(conn, serverRuntimes[i], serverName);
 
+				AppLog.getLogger().debug("getStatisticCapturer against serverRuntime:" + serverName);
+				
 				pollerWorkItemList.add(captureThreadsWkMgr.schedule(new ContextAwareWork() {
 					public void doRun() {
 						try {
@@ -336,6 +347,57 @@ AppLog.getLogger().info("RetrieverBackgroundService - WLS_MIN_VERSION_FOR_USING_
 	}
 
 	/**
+	 * Runs the normal statistic capture process. local server only.
+	 */
+	private void runNormalProcessingLocal() {
+		LocalServerRuntimeServiceMBeanConnection conn = null;
+		try {
+			AppLog.getLogger().debug("Statistics Retriever Background Service running another iteration to capture and log stats");
+			conn = new LocalServerRuntimeServiceMBeanConnection();
+			ObjectName serverRuntime = conn.getServerRuntime();
+			
+			List<WorkItem> pollerWorkItemList = new ArrayList<WorkItem>();
+			
+			final String serverName = conn.getTextAttr(serverRuntime, NAME);
+			final StatisticCapturer capturer = getStatisticCapturer(conn, serverRuntime, serverName);
+
+			AppLog.getLogger().debug("getStatisticCapturer against local serverRuntime:" + serverName);
+				
+			pollerWorkItemList.add(captureThreadsWkMgr.schedule(new ContextAwareWork() {
+				public void doRun() {
+					try {
+						capturer.captureAndLogServerStats();
+					} catch (Exception e) {
+						
+						// ----------------------------------------------
+						// Commented by gregoan
+						// Some applications are taking more than iteration period to be up and running
+						// No need to print stacktrace for "nothing"
+						//AppLog.getLogger().error(e.toString());
+						//e.printStackTrace();
+						// ----------------------------------------------
+						
+						AppLog.getLogger().error("Statistics Retriever Background Service - unable to retrieve statistics for specific server '" + serverName + "' for this iteration");
+					}						
+				}
+			}));				
+			
+			boolean allCompletedSuccessfully = captureThreadsWkMgr.waitForAll(pollerWorkItemList, maxPollIntervalMillis);
+			warnIfTimedOut(allCompletedSuccessfully);
+			cleanupOldStatisticsIfNecessary();
+			AppLog.getLogger().info("Statistics Retriever Background Service completing another iteration successfully");
+		} catch (Exception e) {
+			AppLog.getLogger().error(e.toString());
+			e.printStackTrace();
+			AppLog.getLogger().error("Statistics Retriever Background Service - unable to retrieve statistics for domain's servers for this iteration");
+		} finally {
+			if (conn != null) {
+				conn.close();
+			}
+		}
+	}
+
+	/**
 	 * Returns the implementation of the Statistics Capturer (eg. JMX Poll, 
 	 * WLDF Harvest).
 	 * 
@@ -351,7 +413,22 @@ AppLog.getLogger().info("RetrieverBackgroundService - WLS_MIN_VERSION_FOR_USING_
 			return new StatisticCapturerJMXPoll(statisticsStorage, conn, serverRuntime, serverName, queryIntervalMillis, componentBlacklist, wlsVersionNumber);
 		}
 	}
-		
+	
+	/**
+	 * 
+	 * @param conn
+	 * @param serverRuntime
+	 * @param serverName
+	 * @return
+	 */
+	private StatisticCapturer getStatisticCapturer(WebLogicMBeanConnection conn, ObjectName serverRuntime, String serverName) {
+		if (useWLDFHarvester) {
+			return new StatisticCapturerWLDFQuery(statisticsStorage, conn, serverRuntime, serverName, queryIntervalMillis, componentBlacklist, wlsVersionNumber);
+		} else {
+			return new StatisticCapturerJMXPoll(statisticsStorage, conn, serverRuntime, serverName, queryIntervalMillis, componentBlacklist, wlsVersionNumber);
+		}
+	}
+
 	/**
 	 * If all Work Manager work items have not completed when timeout occurs, 
 	 * log warning
@@ -399,7 +476,6 @@ AppLog.getLogger().info("RetrieverBackgroundService - WLS_MIN_VERSION_FOR_USING_
 	 */
 	private WorkManager getWorkManager(String wkMgrName) throws NamingException {
 		InitialContext ctx = null;
-		
 		try {
 		    ctx = new InitialContext();
 		    return (WorkManager) ctx.lookup(wkMgrName);
@@ -456,6 +532,7 @@ AppLog.getLogger().info("RetrieverBackgroundService - WLS_MIN_VERSION_FOR_USING_
 	// Members
 	private final String domainhealthVersionNumber;
 	private final boolean alwaysUseJMXPoll;
+	private final boolean modeCentral;
 	private final int statisticsRetainNumDays;
 	private final int queryIntervalMillis;
 	private final int minPollIntervalMillis;
@@ -470,7 +547,8 @@ AppLog.getLogger().info("RetrieverBackgroundService - WLS_MIN_VERSION_FOR_USING_
 	private volatile boolean keepRunning = true;
 	private boolean firstTimeProcessingRanOK = false;
 	private long lastCSVCleanupTimeMillis = 0L;
-
+	private Thread backgroundThread;
+	
 	// Constants
 	private final static String DEFAULTED_WLS_VERSION = "9.0.0";
 	private static final String WLS_MIN_VERSION_FOR_USING_WLDF_RELIABLY = "10.3";

@@ -39,7 +39,7 @@ import domainhealth.core.statistics.ResourceNameNormaliser;
 
 /**
  */
-@Path("/jmsaction")
+@Path("jmsaction")
 public class JMSActionService {
 
 	private final static String RESTRICTED_ROLES_TOKENIZER_PATTERN = ",\\s*";
